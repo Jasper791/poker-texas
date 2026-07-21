@@ -24,6 +24,9 @@ export class item extends Component {
     @property({ type: Node })
     revenueValue: Node = null;
 
+    @property({ type: Node, tooltip: '状态' })
+    status: Node = null
+
     updateContent(room: any) {
         const setLabel = (node: Node, value: string) => {
             if (!node) return;
@@ -58,6 +61,9 @@ export class item extends Component {
         const cardCost = room.roomCardCost || room.card_cost || room.cardCount || room.card_count || 0;
         setLabel(this.cardCost, `${cardCost}`);
 
+        const status = room.status !== undefined ? room.status : 0;
+        setLabel(this.status, `${this.getStatusText(status)}`)
+
         setLabel(this.rule, '计分');
     }
 
@@ -80,5 +86,15 @@ export class item extends Component {
             label.string = '0';
             label.color = new Color(100, 100, 100, 255);
         }
+    }
+
+    private getStatusText(status: number): string {
+        const statusMap: { [key: number]: string } = {
+            0: '待确认',
+            1: '已确认',
+            2: '已处理',
+            3: '失败'
+        };
+        return statusMap[status] || `${status}`;
     }
 }
