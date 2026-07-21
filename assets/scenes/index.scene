@@ -220,6 +220,8 @@
     "walletAddressLabelText": {
       "__id__": 36
     },
+    "offSoundBtn": null,
+    "offBackGroundMusicBtn": null,
     "_id": "655oFRKpJGQr4Tjgkzr7kw"
   },
   {
@@ -374,10 +376,7 @@
       "__uuid__": "405c1898-96d7-45ab-b3ea-ef37e66f09c6@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
-    "_hoverSprite": {
-      "__uuid__": "20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941",
-      "__expectedType__": "cc.SpriteFrame"
-    },
+    "_hoverSprite": null,
     "_pressedSprite": null,
     "_disabledSprite": null,
     "_duration": 0.1,

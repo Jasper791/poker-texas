@@ -69,7 +69,7 @@ export class room extends Component {
         // ✅ [新增] 检查登录状态，如果未登录或WebSocket未连接，返回index场景
         const userInfoManager = UserInfoManager.getInstance();
         if (!userInfoManager.canAccessFeatures()) {
-           // LogService.warn('room', '⚠️ WebSocket 未连接或未登录，即将返回 index 场景');
+            // LogService.warn('room', '⚠️ WebSocket 未连接或未登录，即将返回 index 场景');
             this.scheduleOnce(() => {
                 SceneLoader.getInstance().loadScene('index');
             }, 0.5);
@@ -100,12 +100,12 @@ export class room extends Component {
     }
 
     onLoad() {
-         this.editBox.string = "";
+        this.editBox.string = "";
         // 绑定 EditBox 的文本变化事件
         if (this.editBox) {
             this.editBox.node.on(EditBox.EventType.TEXT_CHANGED, this.onTextChanged, this);
         }
-         this.refresh("");
+        this.refresh("");
     }
 
     private onTextChanged() {
@@ -144,7 +144,7 @@ export class room extends Component {
         try {
             await GameNetwork.getInstance().fetchRoomCardBalance();
         } catch (error) {
-           // LogService.warn('room', '刷新房卡余额失败:', error);
+            // LogService.warn('room', '刷新房卡余额失败:', error);
         }
     }
 
@@ -350,7 +350,7 @@ export class room extends Component {
         // 设置重连失败回调
         gameNetwork.setOnReconnectFailed(() => {
             LogService.error('room', '❌ WebSocket 重连失败，返回大厅');
-            
+
             DialogManager.show({
                 title: '网络连接失败',
                 content: '网络连接已断开，重连失败，请检查网络后重新登录',
@@ -359,6 +359,22 @@ export class room extends Component {
 
             gameNetwork.disconnect();
             SceneLoader.getInstance().loadScene('index');
+        });
+
+        // 加入房间回调
+        gameNetwork.setOnJoinRoom((data) => {
+            if (data.code === ResponseCode.SUCCESS) {
+                // 加入成功
+               this.loadPvpScene()
+            } else {
+                LoadingManager.hide();
+                DialogManager.show({
+                     title: '提示',
+                    content: data.msg || data.message || '加入房间失败',
+                    confirmText: '确定',
+                })
+                LogService.error('room', '加入房间失败:', data.msg || data.message);
+            }
         });
 
         // 检查是否已经登录并且 WebSocket 已连接
@@ -510,31 +526,39 @@ export class room extends Component {
             if (roomCode && /^\d+$/.test(roomCode)) {
                 if (SceneLoader.getInstance().isLoading()) return;
                 LoadingManager.show('正在进入房间...');
+                // 先加入房间
+                GameNetwork.getInstance().joinRoom(roomCode, 'PVP', 'Player', '');
+                // 
 
-                SceneLoader.getInstance().preloadScene('scene_pvp', (completedCount, totalCount, item) => {
-                }, (error) => {
-                    if (error) {
-                        LogService.error('room', '预加载 scene_pvp 场景失败:', error);
-                        LoadingManager.hide();
-                        DialogManager.show({
-                            title: '提示',
-                            content: '场景加载失败，请重试',
-                            confirmText: '确定',
-                        });
-                        return;
-                    }
+                // SceneLoader.getInstance().preloadScene('scene_pvp', (completedCount, totalCount, item) => {
+                // }, (error) => {
+                //     if (error) {
+                //         LogService.error('room', '预加载 scene_pvp 场景失败:', error);
+                //         LoadingManager.hide();
+                //         DialogManager.show({
+                //             title: '提示',
+                //             content: '场景加载失败，请重试',
+                //             confirmText: '确定',
+                //         });
+                //         return;
+                //     }
 
-                    // ✅ [关键修复] 设置房间号，等待场景加载完成后再加入房间
-                    // 这样可以确保 gamingPvp.ts 已经初始化，能够正确处理服务端消息
-                    GameNetwork.getInstance().setPendingJoinRoomId(parseInt(roomCode));
-                    GameNetwork.getInstance().setRoomCode(roomCode);
+                //     // ✅ [关键修复] 设置房间号，等待场景加载完成后再加入房间
+                //     // 这样可以确保 gamingPvp.ts 已经初始化，能够正确处理服务端消息
+                //     GameNetwork.getInstance().setPendingJoinRoomId(parseInt(roomCode));
+                //     GameNetwork.getInstance().setRoomCode(roomCode);
 
-                    // 加载场景，场景加载完成后由 gamingPvp.ts 负责加入房间
-                    SceneLoader.getInstance().loadScene('scene_pvp', () => {
-                        LoadingManager.hide();
-                    });
-                });
+                //     // 加载场景，场景加载完成后由 gamingPvp.ts 负责加入房间
+                //     SceneLoader.getInstance().loadScene('scene_pvp', () => {
+                //         LoadingManager.hide();
+                //     });
+                // });
             } else {
+                DialogManager.show({
+                    title: '提示',
+                    content: '请输入有效的房间号（仅数字）',
+                    confirmText: '确定',
+                })
                 //ToastManager.show('请输入有效的房间号（仅数字）')
             }
         }
@@ -682,5 +706,35 @@ export class room extends Component {
 
     onEnterRoomClick() {
         this.tryJoinRoom();
+    }
+
+    // 加载场景
+    loadPvpScene() {
+        if (SceneLoader.getInstance().isLoading()) return;
+        LoadingManager.show('正在进入房间...');
+        SceneLoader.getInstance().preloadScene('scene_pvp', (completedCount, totalCount, item) => {
+        }, (error) => {
+            if (error) {
+                LogService.error('room', `预加载 scene_pvp 场景失败:`, error);
+                LoadingManager.hide();
+                DialogManager.show({
+                    title: '提示',
+                    content: '场景加载失败，请重试',
+                    confirmText: '确定',
+                });
+                return;
+            }
+
+            // ✅ [关键修复] 设置房间号，等待场景加载完成后再加入房间
+            // 这样可以确保 gamingPvp.ts 已经初始化，能够正确处理服务端消息
+            const roomCode = this.roomNumber?.getComponent(EditBox)?.string || '';
+            GameNetwork.getInstance().setPendingJoinRoomId(parseInt(roomCode));
+            GameNetwork.getInstance().setRoomCode(roomCode);
+
+
+            SceneLoader.getInstance().loadScene('scene_pvp', () => {
+                LoadingManager.hide();
+            });
+        });
     }
 }

@@ -926,11 +926,12 @@ export class index extends Component {
                 }
             );
 
+            LoadingManager.hide();
+
             if (success) {
             } else {
                // LogService.error('index', '❌ 钱包连接流程启动失败');
                 this.resetLocalWalletState();
-                LoadingManager.hide();
                 // this.updateWalletAddressDisplay('登录失败');
             }
 
@@ -1096,5 +1097,9 @@ export class index extends Component {
             return;
         }
         SceneLoader.getInstance().loadScene('me');
+    }
+
+    onDestroy() {
+        LoadingManager.hide();
     }
 }

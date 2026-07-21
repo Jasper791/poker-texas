@@ -15,6 +15,9 @@ export class depositItem extends Component {
     @property({type:Node,})
     status:Node = null
 
+    @property({type:Node,tooltip:'代币数'})
+    tokenNum:Node = null
+
     start() {
     }
 
@@ -25,18 +28,25 @@ export class depositItem extends Component {
             blockLabel.string = `${blockNumber}`;
         }
         
-        const txHash = data.txHash !== undefined ? data.txHash : (data.tx_hash !== undefined ? data.tx_hash : '');
-        const formattedTxHash = this.formatTxHash(txHash);
-        const txHashLabel = this.findValueLabel(this.txHash, ['tx_hash', 'txHash']);
-        if(txHashLabel) {
-            txHashLabel.enableWrapText = true;
-            txHashLabel.string = formattedTxHash;
-        }
+        // const txHash = data.txHash !== undefined ? data.txHash : (data.tx_hash !== undefined ? data.tx_hash : '');
+        // const formattedTxHash = this.formatTxHash(txHash);
+        // const txHashLabel = this.findValueLabel(this.txHash, ['tx_hash', 'txHash']);
+        // if(txHashLabel) {
+        //     txHashLabel.enableWrapText = true;
+        //     txHashLabel.string = formattedTxHash;
+        // }
 
         const cardCost = data.tokenAmountDisplay !== undefined ? data.tokenAmountDisplay : (data.token_amount_display !== undefined ? data.token_amount_display : (data.amountDisplay !== undefined ? data.amountDisplay : 0));
         const cardCostLabel = this.findValueLabel(this.costNum, ['cardCost']);
         if(cardCostLabel) {
             cardCostLabel.string = `${cardCost}`;
+        }
+
+        // 代币数
+        const castTokenNum = data.tokenAmount !== undefined ? data.tokenAmount : (data.token_amount !== undefined ? data.token_amount : 0);
+        const tokenNumLabel = this.findValueLabel(this.tokenNum, ['tokenNum']);
+        if(tokenNumLabel) {
+            tokenNumLabel.string = `${castTokenNum} ${data.tokenSymbol ||''}`;
         }
 
         const status = data.status !== undefined ? data.status : 0;
