@@ -1,0 +1,15 @@
+# Cocos Creator 开发环境配置
+# 此文件用于开发阶段的配置优化
+
+{
+  "developer": {
+    "disableCache": true,
+    "enableDebugMode": true,
+    "logLevel": "verbose"
+  },
+  "build": {
+    "enableSourceMap": true,
+    "minifyEnabled": false,
+    "cacheBusting": true
+  }
+}

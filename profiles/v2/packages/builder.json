@@ -1,0 +1,130 @@
+{
+  "log": {
+    "level": 1
+  },
+  "common": {
+    "polyfills": {
+      "asyncFunctions": true
+    },
+    "outputName": "web-mobile",
+    "mainBundleCompressionType": "merge_dep",
+    "platform": "web-mobile",
+    "scenes": [
+      {
+        "url": "db://assets/scenes/index.scene",
+        "uuid": "59091112-416b-4c66-a511-392e98713732",
+        "inBundle": false
+      },
+      {
+        "url": "db://assets/scenes/record.scene",
+        "uuid": "fbe49ee4-23c1-42fc-aaff-42387445e34a",
+        "inBundle": false
+      },
+      {
+        "url": "db://assets/scenes/room.scene",
+        "uuid": "ec6cff82-23a5-4b14-97df-d8830c279e25",
+        "inBundle": false
+      },
+      {
+        "url": "db://assets/scenes/scene_pve.scene",
+        "uuid": "edbf6e04-424c-4e37-bdad-e4519923d88e",
+        "inBundle": false
+      },
+      {
+        "url": "db://assets/scenes/scene_pvp.scene",
+        "uuid": "30b7d8bc-fa00-44e9-abfb-2ef19f4e80ed",
+        "inBundle": false
+      },
+      {
+        "url": "db://assets/scenes/room_pve.scene",
+        "uuid": "57b4456f-f0eb-44aa-b40f-620a876ed65e"
+      }
+    ],
+    "md5Cache": true,
+    "startScene": "59091112-416b-4c66-a511-392e98713732",
+    "debug": false,
+    "sourceMaps": false,
+    "name": "poker-texas"
+  },
+  "BuildTaskManager": {
+    "taskMap": {
+      "1784562764452": {
+        "type": "build",
+        "id": "1784562764452",
+        "progress": 1,
+        "state": "success",
+        "stage": "build",
+        "message": "2026-7-20 23:53 Build success in 73133 ms!",
+        "options": {
+          "name": "poker-texas",
+          "platform": "web-mobile",
+          "buildPath": "project://build",
+          "debug": false,
+          "md5Cache": true,
+          "skipCompressTexture": false,
+          "sourceMaps": false,
+          "polyfills": {
+            "asyncFunctions": true
+          },
+          "experimentalEraseModules": false,
+          "useBuiltinServer": false,
+          "mainBundleIsRemote": false,
+          "mainBundleCompressionType": "merge_dep",
+          "replaceSplashScreen": false,
+          "compressTexture": true,
+          "packAutoAtlas": true,
+          "startScene": "59091112-416b-4c66-a511-392e98713732",
+          "outputName": "web-mobile",
+          "scenes": [
+            {
+              "url": "db://assets/scenes/card.scene",
+              "uuid": "721ca45c-3a7b-466c-8079-773020069356",
+              "inBundle": false
+            },
+            {
+              "url": "db://assets/scenes/index.scene",
+              "uuid": "59091112-416b-4c66-a511-392e98713732",
+              "inBundle": false
+            },
+            {
+              "url": "db://assets/scenes/me.scene",
+              "uuid": "1651bf91-7aaa-4550-b223-8a82a1f84a1f",
+              "inBundle": false
+            },
+            {
+              "url": "db://assets/scenes/record.scene",
+              "uuid": "fbe49ee4-23c1-42fc-aaff-42387445e34a",
+              "inBundle": false
+            },
+            {
+              "url": "db://assets/scenes/room.scene",
+              "uuid": "ec6cff82-23a5-4b14-97df-d8830c279e25",
+              "inBundle": false
+            },
+            {
+              "url": "db://assets/scenes/scene_pvp.scene",
+              "uuid": "30b7d8bc-fa00-44e9-abfb-2ef19f4e80ed",
+              "inBundle": false
+            }
+          ],
+          "web-mobile": [],
+          "packages": {
+            "web-mobile": {
+              "orientation": "auto",
+              "embedWebDebugger": false,
+              "__version__": "1.0.1"
+            },
+            "cocos-service": {
+              "configID": "353809",
+              "services": [],
+              "__version__": "3.0.7"
+            }
+          },
+          "__version__": "1.3.3"
+        },
+        "time": "2026-7-20 23:52",
+        "dirty": false
+      }
+    }
+  }
+}
