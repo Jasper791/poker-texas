@@ -2157,6 +2157,8 @@ export class GameNetwork {
         this._currentSignature = '';
         this._sessionRestored = false;
         UserInfoManager.getInstance().reset();
+        // 清除所有的缓存
+        localStorage.clear()
         
         if (this._onLoginFailed) {
             this._onLoginFailed(error);

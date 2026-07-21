@@ -36,14 +36,14 @@ export class depositItem extends Component {
         //     txHashLabel.string = formattedTxHash;
         // }
 
-        const cardCost = data.tokenAmountDisplay !== undefined ? data.tokenAmountDisplay : (data.token_amount_display !== undefined ? data.token_amount_display : (data.amountDisplay !== undefined ? data.amountDisplay : 0));
+        const cardCost = data.tokenAmountDisplay !== undefined ? data.tokenAmountDisplay : (data.amount_display !== undefined ? data.token_amount_display : (data.amountDisplay !== undefined ? data.amountDisplay : 0));
         const cardCostLabel = this.findValueLabel(this.costNum, ['cardCost']);
         if(cardCostLabel) {
             cardCostLabel.string = `${cardCost}`;
         }
 
         // 代币数
-        const castTokenNum = data.tokenAmount !== undefined ? data.tokenAmount : (data.token_amount !== undefined ? data.token_amount : 0);
+        const castTokenNum = data.amountDisplay !== undefined ? data.amountDisplay : (data.amount_display !== undefined ? data.amount_display : 0);
         const tokenNumLabel = this.findValueLabel(this.tokenNum, ['tokenNum']);
         if(tokenNumLabel) {
             tokenNumLabel.string = `${castTokenNum} ${data.tokenSymbol ||''}`;

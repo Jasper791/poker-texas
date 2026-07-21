@@ -878,6 +878,7 @@ export class index extends Component {
 
             const success = await gameNetwork.connectWalletAndLogin(
                 (data) => {
+                    LoadingManager.hide();
                     // 登录成功回调
                     this._isWalletConnected = true;
                     this._connectionStatus = 'signed';
