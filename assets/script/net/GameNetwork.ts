@@ -11,6 +11,8 @@ import { Web3WalletManager } from '../utils/Web3WalletManager';
 import { SettingsManager } from '../managers/SettingsManager';
 import { UserInfoManager } from '../managers/UserInfoManager';
 import { DialogManager } from '../components/Dialog/dialogManager';
+import { NetworkEvent } from './NetworkEvent';
+import { EventBus } from '../utils/EventBus';
 
 export class GameNetwork {
     private static _instance: GameNetwork = null;
@@ -810,6 +812,7 @@ export class GameNetwork {
 
             LogService.error('GameNetwork', '没有收到服务端的任何响应！');
             if (this._onRoomCreated) {
+                EventBus.getInstance().emit(NetworkEvent.CreateRoom, { code: -1, msg: 'Create room timeout (15s)' });
                 // 用空数据触发回退
                 this._onRoomCreated({ code: -1, msg: 'Create room timeout (15s)' });
             }
@@ -821,6 +824,7 @@ export class GameNetwork {
         if (!this._roomConfig) {
             LogService.error('GameNetwork', '创建房间失败：未设置房间配置（_roomConfig 为空）');
             if (this._onRoomCreated) {
+                EventBus.getInstance().emit(NetworkEvent.CreateRoom, { code: -1, msg: '房间配置未设置' });
                 this._onRoomCreated({ code: -1, msg: '房间配置未设置' });
             }
             return;
@@ -1248,6 +1252,8 @@ export class GameNetwork {
             clearTimeout(this._createRoomTimeout);
             this._createRoomTimeout = null;
         }
+
+         EventBus.getInstance().emit(NetworkEvent.CreateRoom,data);
 
         if (data.code === ResponseCode.SUCCESS) {
             // ✅ 服务端返回的是 ResponseDTO，实际数据在 data.data 中
@@ -2366,6 +2372,8 @@ export class GameNetwork {
      * 处理加入房间响应
      */
     private handleJoinRoomResponse(data: any): void {
+
+        EventBus.getInstance().emit(NetworkEvent.JoinRoom, data);
 
         if (data.code === ResponseCode.SUCCESS) {
             this._roomId = data.roomId || data.room_id || 0;

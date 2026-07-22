@@ -2227,12 +2227,12 @@ export class gamingPvp extends Component {
          */
 
         // ✅ [关键修复] 如果有待创建的房间配置，自动创建房间（由 room.ts 设置的 roomConfig）
-        const roomConfig = this._gameNetwork.getRoomConfig();
-        const roomType = this._gameNetwork.getRoomType();
-        if (roomConfig && roomType === 'PVP') {
-            LogService.info('gamingPvp', `场景加载完成，自动创建房间: roomType=${roomType}, maxPlayers=${roomConfig.maxPlayers}`);
-            this._gameNetwork.createRoom();
-        }
+        // const roomConfig = this._gameNetwork.getRoomConfig();
+        // const roomType = this._gameNetwork.getRoomType();
+        // if (roomConfig && roomType === 'PVP') {
+        //     LogService.info('gamingPvp', `场景加载完成，自动创建房间: roomType=${roomType}, maxPlayers=${roomConfig.maxPlayers}`);
+        //     this._gameNetwork.createRoom();
+        // }
         
 
         if (this._gameNetwork.isConnected() && this._gameNetwork.getWalletAddress()) {

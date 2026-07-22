@@ -486,7 +486,7 @@ export class card extends Component {
             LogService.info('card', `钱包地址：${walletAddress}`);
 
             // ✅ 切换到正确的网络
-            await this.switchToChain(chainId);
+            // await this.switchToChain(chainId);
 
             // ✅ 切换链后重新创建 provider（关键修复）
             // MetaMask 切换链后，原有的 provider 对象不会自动更新

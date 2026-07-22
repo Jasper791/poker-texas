@@ -9,6 +9,8 @@ import { ToastManager } from './components/Toast/ToastManager';
 import { LoadingManager } from './components/Loading/LoadingManager';
 import { DialogManager } from './components/Dialog/dialogManager';
 import { SceneLoader } from './managers/SceneLoader';
+import { NetworkEvent } from './net/NetworkEvent';
+import { EventBus } from './utils/EventBus';
 const { ccclass, property } = _decorator;
 
 @ccclass('room')
@@ -100,6 +102,11 @@ export class room extends Component {
     }
 
     onLoad() {
+         // 创建房间回调
+        EventBus.getInstance().on(NetworkEvent.CreateRoom, this.createRoomCallback, this);
+        // 加入房间回调
+        EventBus.getInstance().on(NetworkEvent.JoinRoom, this.joinRoomCallback, this);
+        
         this.editBox.string = "";
         // 绑定 EditBox 的文本变化事件
         if (this.editBox) {
@@ -362,20 +369,20 @@ export class room extends Component {
         });
 
         // 加入房间回调
-        gameNetwork.setOnJoinRoom((data) => {
-            if (data.code === ResponseCode.SUCCESS) {
-                // 加入成功
-               this.loadPvpScene()
-            } else {
-                LoadingManager.hide();
-                DialogManager.show({
-                     title: '提示',
-                    content: data.msg || data.message || '加入房间失败',
-                    confirmText: '确定',
-                })
-                LogService.error('room', '加入房间失败:', data.msg || data.message);
-            }
-        });
+        // gameNetwork.setOnJoinRoom((data) => {
+        //     if (data.code === ResponseCode.SUCCESS) {
+        //         // 加入成功
+        //         this.loadPvpScene()
+        //     } else {
+        //         LoadingManager.hide();
+        //         DialogManager.show({
+        //             title: '提示',
+        //             content: data.msg || data.message || '加入房间失败',
+        //             confirmText: '确定',
+        //         })
+        //         LogService.error('room', '加入房间失败:', data.msg || data.message);
+        //     }
+        // });
 
         // 检查是否已经登录并且 WebSocket 已连接
         if (gameNetwork.isConnected() && gameNetwork.getWalletAddress()) {
@@ -455,46 +462,98 @@ export class room extends Component {
         if (SceneLoader.getInstance().isLoading()) return;
         LoadingManager.show('正在创建房间...');
 
-        SceneLoader.getInstance().preloadScene('scene_pvp', (completedCount, totalCount, item) => {
-        }, (error) => {
-            if (error) {
-                LogService.error('room', '预加载 scene_pvp 场景失败:', error);
-                LoadingManager.hide();
-                DialogManager.show({
-                    title: '提示',
-                    content: '场景加载失败，请重试',
-                    confirmText: '确定',
-                });
-                return;
-            }
+        const requestData = {
+            gameType: 'TEXAS',
+            roomType: 'PVP',
+            minPlayers: RoomConfigMapper.getMinPlayers(this.selectedMaxPlayersOption),
+            maxPlayers: maxPlayers,
+            rounds: rounds,
+            ruleType: ruleType,
+            ante: ante,
+            smallBlind: smallBlind,
+            bigBlind: bigBlind,
+            initialScore: RoomConfigMapper.getInitialScore(this.selectedRuleTypeOption),
+            maxPlayersOption: this.selectedMaxPlayersOption,
+            roundsOption: this.selectedRoundsOption,
+            ruleTypeOption: this.selectedRuleTypeOption,
+            anteOption: this.selectedAnteOption
+        };
 
-            // ✅ [关键修复] 设置房间配置，等待场景加载完成后再创建房间
-            // 这样可以确保 gamingPvp.ts 已经初始化，能够正确处理服务端消息
-            const requestData = {
-                gameType: 'TEXAS',
-                roomType: 'PVP',
-                minPlayers: RoomConfigMapper.getMinPlayers(this.selectedMaxPlayersOption),
-                maxPlayers: maxPlayers,
-                rounds: rounds,
-                ruleType: ruleType,
-                ante: ante,
-                smallBlind: smallBlind,
-                bigBlind: bigBlind,
-                initialScore: RoomConfigMapper.getInitialScore(this.selectedRuleTypeOption),
-                maxPlayersOption: this.selectedMaxPlayersOption,
-                roundsOption: this.selectedRoundsOption,
-                ruleTypeOption: this.selectedRuleTypeOption,
-                anteOption: this.selectedAnteOption
-            };
+         GameNetwork.getInstance().setRoomConfig(requestData);
+         GameNetwork.getInstance().setRoomType('PVP');
 
-            GameNetwork.getInstance().setRoomConfig(requestData);
-            GameNetwork.getInstance().setRoomType('PVP');
+        GameNetwork.getInstance().createRoom()
 
-            // 加载场景，场景加载完成后由 gamingPvp.ts 负责创建房间
-            SceneLoader.getInstance().loadScene('scene_pvp', () => {
-                LoadingManager.hide();
-            });
-        });
+        // SceneLoader.getInstance().preloadScene('scene_pvp', (completedCount, totalCount, item) => {
+        // }, (error) => {
+        //     if (error) {
+        //         LogService.error('room', '预加载 scene_pvp 场景失败:', error);
+        //         LoadingManager.hide();
+        //         DialogManager.show({
+        //             title: '提示',
+        //             content: '场景加载失败，请重试',
+        //             confirmText: '确定',
+        //         });
+        //         return;
+        //     }
+
+        //     // ✅ [关键修复] 设置房间配置，等待场景加载完成后再创建房间
+        //     // 这样可以确保 gamingPvp.ts 已经初始化，能够正确处理服务端消息
+        //     const requestData = {
+        //         gameType: 'TEXAS',
+        //         roomType: 'PVP',
+        //         minPlayers: RoomConfigMapper.getMinPlayers(this.selectedMaxPlayersOption),
+        //         maxPlayers: maxPlayers,
+        //         rounds: rounds,
+        //         ruleType: ruleType,
+        //         ante: ante,
+        //         smallBlind: smallBlind,
+        //         bigBlind: bigBlind,
+        //         initialScore: RoomConfigMapper.getInitialScore(this.selectedRuleTypeOption),
+        //         maxPlayersOption: this.selectedMaxPlayersOption,
+        //         roundsOption: this.selectedRoundsOption,
+        //         ruleTypeOption: this.selectedRuleTypeOption,
+        //         anteOption: this.selectedAnteOption
+        //     };
+
+        //     GameNetwork.getInstance().setRoomConfig(requestData);
+        //     GameNetwork.getInstance().setRoomType('PVP');
+
+        //     // 加载场景，场景加载完成后由 gamingPvp.ts 负责创建房间
+        //     SceneLoader.getInstance().loadScene('scene_pvp', () => {
+        //         LoadingManager.hide();
+        //     });
+        // });
+    }
+
+    private createRoomCallback(data: any) {
+        if (data.code === ResponseCode.SUCCESS) {
+            // 加入成功
+            this.loadPvpScene()
+        } else {
+            LoadingManager.hide();
+            DialogManager.show({
+                title: '提示',
+                content: data.msg || data.message || '创建房间失败',
+                confirmText: '确定',
+            })
+            LogService.error('room', '创建房间失败:', data.msg || data.message);
+        }
+    }
+
+    private joinRoomCallback(data: any) {
+        if (data.code === ResponseCode.SUCCESS) {
+            // 加入成功
+            this.loadPvpScene()
+        } else {
+            LoadingManager.hide();
+            DialogManager.show({
+                title: '提示',
+                content: data.msg || data.message || '加入房间失败',
+                confirmText: '确定',
+            })
+            LogService.error('room', '加入房间失败:', data.msg || data.message);
+        }
     }
 
     onJoinButtonClick() {
@@ -560,32 +619,6 @@ export class room extends Component {
                     confirmText: '确定',
                 })
                 //ToastManager.show('请输入有效的房间号（仅数字）')
-            }
-        }
-    }
-
-    private showErrorTip(message: string) {
-        // ✅ [实现] 显示错误提示
-        LogService.error('room', `错误提示: ${message}`);
-
-        // 如果有 UI 提示节点，可以在这里添加显示逻辑
-        // 例如：创建一个提示弹窗或在屏幕上显示文字
-        if (this.createRoom) {
-            // 尝试查找提示节点
-            const tipNode = this.createRoom.getChildByName('errorTip');
-            if (tipNode) {
-                const label = tipNode.getComponent(Label);
-                if (label) {
-                    label.string = message;
-                    tipNode.active = true;
-
-                    // 3秒后自动隐藏
-                    setTimeout(() => {
-                        if (tipNode && tipNode.isValid) {
-                            tipNode.active = false;
-                        }
-                    }, 3000);
-                }
             }
         }
     }
@@ -736,5 +769,11 @@ export class room extends Component {
                 LoadingManager.hide();
             });
         });
+    }
+
+    onDestroy() {
+        // 移除事件监听，避免内存泄漏
+        EventBus.getInstance().off(NetworkEvent.CreateRoom, this.createRoomCallback, this);
+        EventBus.getInstance().off(NetworkEvent.JoinRoom, this.joinRoomCallback, this);
     }
 }
