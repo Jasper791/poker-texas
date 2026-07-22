@@ -210,6 +210,9 @@ export class GameNetwork {
         if (this._sessionRestored || !this.isLoggedIn()) {
             return true;
         }
+        if (this._isReconnecting) {
+            return false;
+        }
         if (!this._wsManager.isConnected()) {
             return false;
         }
@@ -369,10 +372,12 @@ export class GameNetwork {
                 this._isLoggingIn = false;
                 this._loginPromise = null;
 
-                LogService.info('GameNetwork', '🔄 WebSocket重连成功，准备重新登录...');
-                
-                // ✅ [修复] RECONNECT命令被服务端禁用，改用保存的签名重新登录
-                this.sendWalletLoginWithSavedSignature();
+                LogService.info('GameNetwork', '🔄 WebSocket重连成功，开始恢复连接状态...');
+                if (this._roomId <= 0 && !this._currentRoomId) {
+                    this.sendReconnectByCurrentPage();
+                } else {
+                    LogService.info('GameNetwork', '牌桌重连由 gamingPvp 发送 PLAYER_RECONNECT(530)');
+                }
 
                 if (this._onConnected) {
                     this._onConnected();
@@ -440,6 +445,10 @@ export class GameNetwork {
             // 处理心跳响应（兼容 HEARTBEAT 与 HEARTBEAT_REQUEST）
             if (message.cmd === CommandType.HEARTBEAT || message.cmd === CommandType.HEARTBEAT_REQUEST) {
                 this._wsManager.handleHeartbeatResponse(message.body?.server_time);
+                if (message.cmd === CommandType.HEARTBEAT &&
+                    (message.body?.success !== undefined || message.body?.code !== undefined)) {
+                    this.handleSessionBindingResponse(message.body);
+                }
                 return;
             }
 
@@ -959,6 +968,9 @@ export class GameNetwork {
             case CommandType.RECONNECT:
                 this.handleReconnectResponse(body);
                 break;
+            case CommandType.PLAYER_RECONNECT:
+                this.handleReconnectResponse(body);
+                break;
             case CommandType.CREATE_ROOM:
                 this.handleCreateRoomResponse(body);
                 break;
@@ -966,7 +978,11 @@ export class GameNetwork {
                 this.handleJoinRoomResponse(body);
                 break;
             case CommandType.HEARTBEAT:
-                this.handleHeartbeat(body);
+                if (body && (body.success !== undefined || body.code !== undefined)) {
+                    this.handleSessionBindingResponse(body);
+                } else {
+                    this.handleHeartbeat(body);
+                }
                 break;
             case CommandType.GAME_STATE_SYNC:
                 this.handleGameStateSync(body);
@@ -1756,13 +1772,18 @@ export class GameNetwork {
         if (success) {
             this.applySessionFromResponse(response);
             this._sessionRestored = true;
+            const reconnectStatus = response?.reconnectStatus || response?.reconnect_status;
             if (gameState) {
                 this.saveGameState(gameState);
                 this.handleGameStateSync(gameState);
             }
 
             if (this._onReconnectSuccess) {
-                this._onReconnectSuccess(gameState);
+                this._onReconnectSuccess({
+                    ...response,
+                    gameState,
+                    reconnectStatus
+                });
             }
             return;
         }
@@ -1772,6 +1793,11 @@ export class GameNetwork {
         if (code === 401 || code === 403 || message?.includes('未登录') || message?.includes('Forbidden')) {
             LogService.warn('GameNetwork', '重连失败：认证过期，触发自动重新登录');
             this._triggerAutoLogin();
+        }
+
+        if (code === 404) {
+            this.resetRoomId();
+            this.clearSavedGameState();
         }
 
         if (this._onReconnectFailed) {
@@ -1801,6 +1827,68 @@ export class GameNetwork {
             }
         } catch (e) {
             LogService.error('GameNetwork', '_triggerAutoLogin failed:', e);
+        }
+    }
+
+    /**
+     * WebSocket 重连成功后，根据当前是否仍在牌桌选择会话绑定方式。
+     * 大厅使用 cmd=1，牌桌使用 cmd=530；两者都只依赖 token。
+     */
+    private sendReconnectByCurrentPage(): void {
+        const token = this.getAuthToken();
+        if (!token) {
+            LogService.warn('GameNetwork', '重连恢复跳过：token 为空');
+            this._triggerAutoLogin();
+            return;
+        }
+
+        if (this._roomId > 0 || this._currentRoomId) {
+            const roomId = this._currentRoomId || this._roomId;
+            this.sendMessage(CommandType.PLAYER_RECONNECT, {
+                token,
+                ...(roomId > 0 ? { roomId } : {})
+            });
+            return;
+        }
+
+        this.sendMessage(CommandType.HEARTBEAT, {
+            token,
+            timestamp: Date.now()
+        });
+    }
+
+    /**
+     * 发送牌桌重连请求。
+     * 由 gamingPvp 在监听到断线并确认 WebSocket 恢复后调用。
+     */
+    public sendPlayerReconnect(roomId?: number): void {
+        const token = this.getAuthToken();
+        const reconnectRoomId = roomId || this._currentRoomId || this._roomId;
+
+        if (!token) {
+            LogService.warn('GameNetwork', 'PLAYER_RECONNECT(530) 跳过：token 为空');
+            this._triggerAutoLogin();
+            return;
+        }
+
+        this.sendMessage(CommandType.PLAYER_RECONNECT, {
+            token,
+            ...(reconnectRoomId > 0 ? { roomId: reconnectRoomId } : {})
+        });
+    }
+
+    /** 处理大厅重连后的 cmd=1 会话绑定响应。 */
+    private handleSessionBindingResponse(data: any): void {
+        const code = Number(data?.code ?? (data?.success ? 0 : -1));
+        if (data?.success === true || code === ResponseCode.SUCCESS || code === 0) {
+            this._sessionRestored = true;
+            this._isReconnecting = false;
+            return;
+        }
+
+        this._sessionRestored = false;
+        if (code === 401 || code === 403) {
+            this._triggerAutoLogin();
         }
     }
 

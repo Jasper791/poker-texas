@@ -172,6 +172,7 @@ export class gamingPvp extends Component {
     private _isGameEnded: boolean = false; // 当前游戏是否已结束
     private _isNewRoundStarted: boolean = false; // 是否是新一轮开始
     private _isSceneUnloading: boolean = false; // 场景是否正在卸载（用于防止场景卸载后仍处理消息）
+    private _waitingForSocketReconnect: boolean = false;
     private _lastGameStartNotifyTime: number = 0; // 上次处理 GAME_START_NOTIFY 的时间戳（防重复）
     private _lastGameStartRound: number = 0; // 上次处理 GAME_START_NOTIFY 的轮次（防重复）
     private _lastSequence: number = 0; // 最后处理的消息序列号，用于丢弃过期消息
@@ -2182,6 +2183,26 @@ export class gamingPvp extends Component {
             this.handleServerError(error);
         });
 
+        this._gameNetwork.setOnDisconnected(() => {
+            if (this._isSceneUnloading) {
+                return;
+            }
+
+            this._waitingForSocketReconnect = true;
+            LogService.info('gamingPvp', '牌桌检测到 WebSocket 断开，等待重连后发送 PLAYER_RECONNECT(530)');
+            this._showNetworkDisconnectTip();
+        });
+
+        this._gameNetwork.setOnConnected(() => {
+            if (this._isSceneUnloading || this._roomId <= 0 || !this._waitingForSocketReconnect) {
+                return;
+            }
+
+            this._waitingForSocketReconnect = false;
+            LogService.info('gamingPvp', `牌桌 WebSocket 已恢复，发送 PLAYER_RECONNECT(530), roomId=${this._roomId}`);
+            this._gameNetwork.sendPlayerReconnect(this._roomId);
+        });
+
         this._gameNetwork.setOnHeartbeatTimeout(() => {
             LogService.warn('gamingPvp', '心跳超时，网络连接已断开');
             this._showNetworkDisconnectTip();
@@ -2194,10 +2215,20 @@ export class gamingPvp extends Component {
         });
 
         // ✅ [修复] 重连成功后隐藏断线重连遮罩和网络断联提示，并重设消息回调
-        this._gameNetwork.setOnReconnectSuccess((gameState) => {
+        this._gameNetwork.setOnReconnectSuccess((reconnectData) => {
             LogService.info('gamingPvp', '重连成功，隐藏断线重连遮罩');
             if (this.disconnectMask && this.disconnectMask.active) {
                 this.hideDisconnectMask();
+            }
+
+            const reconnectStatus = reconnectData?.reconnectStatus;
+            const gameState = reconnectData?.gameState || reconnectData;
+            if (reconnectStatus === 'SPECTATOR_UNTIL_NEXT_ROUND') {
+                LogService.info('gamingPvp', '重连状态为观战，隐藏操作按钮，等待下一局');
+                this.hideAllActionButtons();
+            } else if (reconnectStatus === 'RESTORED' && reconnectData?.gameState) {
+                LogService.info('gamingPvp', '重连状态为 RESTORED，使用服务端 gameState 覆盖本地牌局');
+                this.handleGameStateSync(gameState);
             }
             
             // ✅ [关键修复] 重连成功后重新设置消息回调，确保后续消息能被正确处理

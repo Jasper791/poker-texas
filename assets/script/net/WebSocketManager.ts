@@ -99,11 +99,12 @@ export class WebSocketManager {
                 this._isConnected = true;
                 this._reconnectAttempts = 0;
                 
-                this._startHeartbeat();
-                
                 if (this._onConnected) {
                     this._onConnected();
                 }
+
+                // 让上层先发送重连绑定/牌桌恢复请求，再开始周期心跳。
+                this._startHeartbeat(false);
             };
 
             this._ws.onmessage = (event: MessageEvent) => {
@@ -328,9 +329,11 @@ export class WebSocketManager {
 
 
 
-    private _startHeartbeat(): void {
+    private _startHeartbeat(sendImmediately: boolean = true): void {
         this._stopHeartbeat();
-        this._sendHeartbeat();
+        if (sendImmediately) {
+            this._sendHeartbeat();
+        }
         this._heartbeatTimer = setInterval(() => {
             this._sendHeartbeat();
         }, this._heartbeatInterval);
@@ -441,7 +444,7 @@ export class WebSocketManager {
             this._lastHeartbeatSendTime = Date.now();
             const heartbeat = {
                 client_time: this._lastHeartbeatSendTime,
-                userId: this._userId
+                timestamp: this._lastHeartbeatSendTime
             };
             
             this.sendMessage(1, heartbeat); // CommandType.HEARTBEAT = 1
