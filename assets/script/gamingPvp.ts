@@ -1,7 +1,3 @@
-/**
- * 游戏主控制器
- * 负责游戏的初始化、流程控制、玩家操作处理等核心功能
- */
 import { _decorator, Layers, Component, Node, Label, Sprite, SpriteFrame, Prefab, Vec3, tween, instantiate, math, setDisplayStats, Button, view, UITransform, Color, resources, EditBox, find, director } from 'cc';
 import { GameManager } from './managers/GameManager';
 import { PlayerManager } from './managers/PlayerManager';
@@ -191,6 +187,15 @@ export class gamingPvp extends Component {
 
     /** ✅ [新增] 断线时暂停的操作倒计时剩余时间，用于断线恢复后继续倒计时 */
     private _pausedActionTimeRemaining: number = 0;
+
+    /** ✅ [新增 CLAUDE_MOD_215_203_TURNID] 当前轮到本玩家操作的 turnId（来自 cmd=215 的 actionNotify.turnId），发送 203 时携带 */
+    private _currentTurnId: number | null = null;
+
+    /** ✅ [新增 CLAUDE_MOD_215_203_TURNID] 操作是否正在等待服务端响应，点击后立即置为 true，防止连续点击发送多次 203
+     * 在以下时机清除：收到新的 215（NOTIFY_PLAYER_TURN）、收到行动结果（203/PLAYER_ACTION_NOTIFY 响应）、
+     * 收到结算通知（GAME_SETTLEMENT）、或收到错误码 11（操作已过期）
+     */
+    private _actionPending: boolean = false;
 
     // 房间规则类型: 0=计分方式(每局1000), 1=筹码扣减方式, 2=代币扣减
     private _scoreType: number = 0;
@@ -3679,6 +3684,10 @@ export class gamingPvp extends Component {
 
         const notify = data.actionNotify;
 
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 收到新的215（NOTIFY_PLAYER_TURN），清除旧的操作倒计时与操作等待状态
+        this.stopActionTimer();
+        this.clearActionPending();
+
         // ✅ [修复] 客户端自行判断 isMyTurn
         // 服务端改用 broadcastToRoom 广播，isMyTurn 统一为 true
         // 客户端通过比较 actionPlayer.userId 与自身 userId 来判断是否轮到自己
@@ -3859,6 +3868,9 @@ export class gamingPvp extends Component {
         // 检查是否轮到当前玩家操作
         if (notify.isMyTurn) {
 
+            // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 记录本次轮到自己操作的 turnId，发送 203 时携带，避免过期操作被服务端处理
+            this._currentTurnId = notify.turnId !== undefined ? notify.turnId : this._currentTurnId;
+
             // 如果是轮到真实玩家操作，确保AI锁被释放
             if (this._gameFlowPvpController?.isAIActionInProgress()) {
                 this._gameFlowPvpController.setAIActionInProgress(false);
@@ -3951,12 +3963,20 @@ export class gamingPvp extends Component {
                 this._actionPresenter.showPlayerActions(availableActions, data, notify);
             }
 
-            // ✅ [关键修复] 设置超时计时器时，优先使用断线暂停时保存的剩余时间
-            // 如果存在剩余时间，则使用该时间继续倒计时，否则使用默认的30秒
-            const actionDuration = this._pausedActionTimeRemaining > 0 ? this._pausedActionTimeRemaining : 30;
+            // ✅ [修改 CLAUDE_MOD_215_203_TURNID] 设置超时计时器时，优先使用断线暂停时保存的剩余时间，
+            // 否则按服务端时间计算剩余时间，避免客户端时钟误差（原逻辑：无剩余时间时固定使用30秒，未删除，逻辑保留于下方注释）
+            // 原代码：const actionDuration = this._pausedActionTimeRemaining > 0 ? this._pausedActionTimeRemaining : 30;
+            let actionDuration = 30;
             if (this._pausedActionTimeRemaining > 0) {
+                actionDuration = this._pausedActionTimeRemaining;
                 LogService.info('gamingPvp', `[断线恢复] 使用暂停时的剩余时间继续倒计时: ${actionDuration}秒`);
                 this._pausedActionTimeRemaining = 0; // 重置，避免下次重复使用
+            } else if (notify.turnDeadlineTime !== undefined && notify.timestamp !== undefined) {
+                // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 按照服务端时间计算剩余时间，避免客户端时钟误差
+                const remainingMs = notify.turnDeadlineTime - notify.timestamp;
+                if (remainingMs > 0) {
+                    actionDuration = remainingMs / 1000;
+                }
             }
             // 设置超时计时器
             this.startActionTimer(actionDuration);
@@ -4054,6 +4074,18 @@ export class gamingPvp extends Component {
      */
     handlePlayerActionResponse(data: any) {
 
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 错误码 11 表示操作已过期，清除操作状态并等待最新215，不再继续处理本次响应
+        if (data.code === 11) {
+            LogService.warn('gamingPvp', '[WARN] handlePlayerActionResponse: 操作已过期(code=11)，清除操作状态并等待最新215');
+            this.clearActionPending();
+            this.stopActionTimer();
+            this.hideAllActionButtons();
+            if (this.playersActionNode) {
+                this.playersActionNode.active = false;
+            }
+            return;
+        }
+
         // ✅ [新增] 检查游戏状态，如果已经处于结算状态，忽略操作响应
         if (data.status === 'SETTLEMENT' || data.status === 'GAME_OVER') {
             return;
@@ -4121,6 +4153,9 @@ export class gamingPvp extends Component {
         // ✅ [新增] 记录玩家操作完成时间，用于控制回合切换间隔
         this._lastActionCompleteTime = Date.now();
 
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 收到行动结果，清除操作等待状态
+        this.clearActionPending();
+
         // 隐藏操作按钮
         this.hideAllActionButtons();
         if (this.playersActionNode) {
@@ -4134,8 +4169,24 @@ export class gamingPvp extends Component {
      */
     handleActOperationResponse(data: any) {
 
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 错误码 11 表示操作已过期，清除操作状态并等待最新215，不再继续处理本次响应
+        if (data.code === 11) {
+            LogService.warn('gamingPvp', '[WARN] handleActOperationResponse: 操作已过期(code=11)，清除操作状态并等待最新215');
+            this.clearActionPending();
+            this._gameFlowPvpController?.setActionProcessing(false);
+            this.stopActionTimer();
+            this.hideAllActionButtons();
+            if (this.playersActionNode) {
+                this.playersActionNode.active = false;
+            }
+            return;
+        }
+
         // ✅ [新增] 记录玩家操作完成时间，用于控制回合切换间隔
         this._lastActionCompleteTime = Date.now();
+
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 收到行动结果（cmd=203响应），清除操作等待状态
+        this.clearActionPending();
 
         // 如果有玩家数据，更新玩家状态
         if (data.players) {
@@ -5730,6 +5781,9 @@ export class gamingPvp extends Component {
         // 这是防止结算阶段玩家仍显示倒计时的关键修复
         this.manualStopCountdown();
 
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 收到结算通知，清除操作等待状态
+        this.clearActionPending();
+
         // ✅ [关键修复] 结算阶段隐藏所有玩家的准备标识（ok图标）
         // 服务端已重置所有玩家的准备状态，客户端需要同步更新UI
         this.hideAllReadyIndicators();
@@ -6458,8 +6512,17 @@ export class gamingPvp extends Component {
                     LogService.warn('gamingPvp', '操作超时回调跳过：游戏状态已失效');
                     return;
                 }
-                LogService.warn('gamingPvp', '操作超时，自动弃牌');
-                this.fold();
+                // 🔶 [行为变更 CLAUDE_MOD_215_203_TURNID] 前端倒计时结束后不再发送 203/FOLD，后端已有超时自动弃牌逻辑
+                // 原代码未删除，保留如下（已注释停用）：
+                // LogService.warn('gamingPvp', '操作超时，自动弃牌');
+                // this.fold();
+                // 新逻辑：仅清理本地操作状态（隐藏按钮、清除actionPending），等待服务端最新的215通知
+                LogService.warn('gamingPvp', '操作超时，等待服务端自动弃牌处理（不再由前端发送203/FOLD）');
+                this.hideAllActionButtons();
+                if (this.playersActionNode) {
+                    this.playersActionNode.active = false;
+                }
+                this.clearActionPending();
             },
             duration  // 倒计时时长
         );
@@ -7781,6 +7844,14 @@ export class gamingPvp extends Component {
         }
     }
 
+    /**
+     * ✅ [新增] 清除操作等待状态（actionPending）
+     * 在收到新215、行动结果、结算通知、或错误码11（操作已过期）时调用
+     */
+    private clearActionPending() {
+        this._actionPending = false;
+    }
+
     // 获取下一个活跃玩家（未弃牌且还有筹码的）
     getNextActivePlayer(startFrom: number): number {
         const playersNum = this._playerManager.getPlayersNum();
@@ -7880,7 +7951,9 @@ export class gamingPvp extends Component {
 
         // 通过GameNetwork发送消息
         if (this._gameNetwork) {
-            this._gameNetwork.sendPlayerAction(this._roomId, actionType, amount);
+            // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 携带 turnId，服务端可据此判断操作是否已过期（对应最新一次 215 的 turnId）
+            // 原代码：this._gameNetwork.sendPlayerAction(this._roomId, actionType, amount);
+            this._gameNetwork.sendPlayerAction(this._roomId, actionType, amount, this._currentTurnId);
 
             // ✅ [修复] 发送操作完成通知，通知服务端玩家操作已完成
             // 这是关键步骤，缺少此调用会导致服务端认为玩家还在操作中
@@ -7947,6 +8020,12 @@ export class gamingPvp extends Component {
         if (this._gameFlowPvpController?.isActionProcessing()) {
             return;
         }
+
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 操作等待服务端响应中，防止连续点击重复发送203
+        if (this._actionPending) {
+            return;
+        }
+        this._actionPending = true;
 
         // 设置操作处理中标志
         this._gameFlowPvpController?.setActionProcessing(true);
@@ -8081,6 +8160,12 @@ export class gamingPvp extends Component {
             return;
         }
 
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 操作等待服务端响应中，防止连续点击重复发送203
+        if (this._actionPending) {
+            return;
+        }
+        this._actionPending = true;
+
         // 设置操作处理中标志
         this._gameFlowPvpController?.setActionProcessing(true);
 
@@ -8144,6 +8229,12 @@ export class gamingPvp extends Component {
         if (this._gameFlowPvpController?.isActionProcessing()) {
             return;
         }
+
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 操作等待服务端响应中，防止连续点击重复发送203
+        if (this._actionPending) {
+            return;
+        }
+        this._actionPending = true;
 
         // 设置操作处理中标志
         this._gameFlowPvpController?.setActionProcessing(true);
@@ -8209,6 +8300,12 @@ export class gamingPvp extends Component {
             return;
         }
 
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 操作等待服务端响应中，防止连续点击重复发送203
+        if (this._actionPending) {
+            return;
+        }
+        this._actionPending = true;
+
         // 设置操作处理中标志
         this._gameFlowPvpController?.setActionProcessing(true);
 
@@ -8262,6 +8359,12 @@ export class gamingPvp extends Component {
             return;
         }
 
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 操作等待服务端响应中，防止连续点击重复发送203
+        if (this._actionPending) {
+            return;
+        }
+        this._actionPending = true;
+
         this._gameFlowPvpController?.setActionProcessing(true);
 
         this.manualStopCountdown();
@@ -8313,6 +8416,12 @@ export class gamingPvp extends Component {
         if (this._gameFlowPvpController?.isActionProcessing()) {
             return;
         }
+
+        // ✅ [新增 CLAUDE_MOD_215_203_TURNID] 操作等待服务端响应中，防止连续点击重复发送203
+        if (this._actionPending) {
+            return;
+        }
+        this._actionPending = true;
 
         // 设置操作处理中标志
         this._gameFlowPvpController?.setActionProcessing(true);
@@ -8536,12 +8645,20 @@ export class gamingPvp extends Component {
 
         // 如果是真实玩家
         if (!isCurrentTurnAI) {
-            // ✅ [修复] 玩家30秒内未操作，应该自动弃牌，而不是看牌或跟注
-            // 根据用户需求：超时未操作 = 弃牌
-            const amount = this._getAmountFromServerActions('FOLD');
-            this._sendPlayerActionToServer(ActionType.FOLD, amount);
+            // 🔶 [行为变更 CLAUDE_MOD_215_203_TURNID] 前端倒计时结束后不再发送 203/FOLD，后端已有超时自动弃牌逻辑
+            // 原代码未删除，保留如下（已注释停用）：
+            // const amount = this._getAmountFromServerActions('FOLD');
+            // this._sendPlayerActionToServer(ActionType.FOLD, amount);
+            // 新逻辑：仅清理本地操作状态（隐藏按钮、清除actionPending、停止倒计时），等待服务端最新的215通知
+            LogService.warn('gamingPvp', 'handleCountdownTimeout: 操作超时，等待服务端自动弃牌处理（不再由前端发送203/FOLD）');
+            this.hideAllActionButtons();
+            if (this.playersActionNode) {
+                this.playersActionNode.active = false;
+            }
+            this.clearActionPending();
+            this.stopActionTimer();
 
-            // 超时自动弃牌后隐藏自己的手牌
+            // 超时后隐藏自己的手牌（服务端确认弃牌后也会通过215/结算同步）
             const playerSeat = this._playerManager.getPlayerSeat();
             if (playerSeat >= 0) {
                 this.hideAIFoldedPlayerCards(playerSeat);

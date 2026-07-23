@@ -1464,7 +1464,7 @@ export class GameNetwork {
     /**
      * 发送玩家操作
      */
-    public sendPlayerAction(roomId: number, actionType: number | string, betAmount: number): void {
+    public sendPlayerAction(roomId: number, actionType: number | string, betAmount: number, turnId: number): void {
         // ✅ [关键修复] 支持字符串枚举和数字枚举
         let actionStr = '';
 
@@ -1490,6 +1490,7 @@ export class GameNetwork {
             room_id: roomId,
             roomId: roomId,
             action: actionStr,
+            turnId,
             amount: betAmount,
             betAmount: betAmount
         };
