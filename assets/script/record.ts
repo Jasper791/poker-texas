@@ -616,14 +616,14 @@ export class Record extends Component {
         };
 
         // 如果有传入 roomId，添加到查询条件
-        if (queryRoomId && queryRoomId > 0) {
-            requestData.room_id = queryRoomId;
-        }
+        // if (queryRoomId && queryRoomId > 0) {
+        //     requestData.room_id = queryRoomId;
+        // }
 
-        // 如果有传入 roomCode，添加到查询条件
-        if (queryRoomCode && queryRoomCode.length > 0) {
-            requestData.room_code = queryRoomCode;
-        }
+        // // 如果有传入 roomCode，添加到查询条件
+        // if (queryRoomCode && queryRoomCode.length > 0) {
+        //     requestData.room_code = queryRoomCode;
+        // }
 
         // 发送请求
         gameNetwork.sendMessage(CommandType.GET_ROOM_GAME_FLOW, requestData);

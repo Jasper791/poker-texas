@@ -4996,6 +4996,9 @@ export class gamingPvp extends Component {
             return;
         }
 
+        // Refresh the private-card cache even when existing card nodes are kept.
+        this._syncSelfHoleCardsFromPlayers(players);
+
         const status = gameStatus || '';
         const isGameActive = status !== 'WAITING' && status !== 'SETTLEMENT' && status !== 'WAITING_FOR_CONFIRMATION';
 
@@ -5140,6 +5143,39 @@ export class gamingPvp extends Component {
      * [SERVER_MODE_ONLY] 处理玩家操作通知 - 服务端模式专用
      * 服务端发送 PLAYER_ACTION_NOTIFY 后调用此方法
      */
+    private _getVisibleHoleCards(playerData: any): number[] | undefined {
+        if (!playerData) {
+            return undefined;
+        }
+
+        const candidates = [playerData.holeCards, playerData.handCards, playerData.cards];
+        return candidates.find(cards => Array.isArray(cards) && cards.length === 2);
+    }
+
+    /**
+     * Incrementally synchronizes only the current player's private cards.
+     * Missing fields and opponents' empty arrays must not erase the local hand.
+     */
+    private _syncSelfHoleCardsFromPlayers(players: any[]): void {
+        if (!players || !Array.isArray(players) || !this._gameManager) {
+            return;
+        }
+
+        const currentUserId = this._gameNetwork?.getUserId();
+        const selfPlayer = players.find((player: any) => {
+            const playerUserId = player?.userId !== undefined ? player.userId : player?.user_id;
+            return player?.isSelf === true || (currentUserId !== undefined
+                && currentUserId !== null
+                && Number(playerUserId) === Number(currentUserId));
+        });
+        const cards = this._getVisibleHoleCards(selfPlayer);
+        if (!selfPlayer || !cards || selfPlayer.seatIndex === undefined) {
+            return;
+        }
+
+        this._gameManager.setPlayerHoleCardsFromServer(selfPlayer.seatIndex, cards);
+    }
+
     handlePlayerActionNotify(data: any) {
         LogService.info('gamingPvp', `收到 PLAYER_ACTION_NOTIFY: ${JSON.stringify(data?.actionNotify || {})}`);
 
@@ -5157,20 +5193,23 @@ export class gamingPvp extends Component {
 
         // ✅ [增强] 优先使用 seatIndex，其次通过 userId 查找
         let playerIndex = -1;
+        const actionUserId = actionNotify.userId !== undefined ? actionNotify.userId
+            : (actionNotify.playerId !== undefined ? actionNotify.playerId : actionNotify.targetUserId);
+
+        // User identity is authoritative; seat indexes can be stale during synchronization.
+        if (actionUserId !== undefined && actionUserId !== null) {
+            playerIndex = this._playerManager.getPlayerIndexByUserId(actionUserId);
+        }
 
         // 1. 优先使用直接提供的座位索引
-        if (actionNotify.targetUserSeatIndex !== undefined) {
+        if (playerIndex < 0 && actionNotify.targetUserSeatIndex !== undefined) {
             playerIndex = actionNotify.targetUserSeatIndex;
-        } else if (actionNotify.playerIndex !== undefined) {
+        } else if (playerIndex < 0 && actionNotify.playerIndex !== undefined) {
             playerIndex = actionNotify.playerIndex;
-        } else if (actionNotify.seatIndex !== undefined) {
+        } else if (playerIndex < 0 && actionNotify.seatIndex !== undefined) {
             playerIndex = actionNotify.seatIndex;
         }
         // 2. 如果没有座位索引，尝试通过 userId 查找
-        else if (actionNotify.userId !== undefined || actionNotify.targetUserId !== undefined) {
-            const userId = actionNotify.userId || actionNotify.targetUserId;
-            playerIndex = this._playerManager.getPlayerIndexByUserId(userId);
-        }
 
         // 检查玩家索引是否有效
         if (playerIndex < 0) {
@@ -5196,7 +5235,16 @@ export class gamingPvp extends Component {
         // ✅ [新增] 玩家弃牌时隐藏其手牌（无论是否是自己）
         const actionNameLower = typeof actionType === 'string' ? actionType.toLowerCase() : this._getActionName(actionType);
         if (actionNameLower === 'fold') {
-            this.hideAIFoldedPlayerCards(playerIndex);
+            const currentUserId = this._gameNetwork?.getUserId();
+            const wouldHideWrongSelf = playerIndex === realPlayerSeat
+                && actionUserId !== undefined
+                && actionUserId !== null
+                && Number(actionUserId) !== Number(currentUserId);
+            if (wouldHideWrongSelf) {
+                LogService.warn('gamingPvp', `[handlePlayerActionNotify] ignore mismatched fold card removal: actionUserId=${actionUserId}, playerIndex=${playerIndex}, selfSeat=${realPlayerSeat}`);
+            } else {
+                this.hideAIFoldedPlayerCards(playerIndex);
+            }
         }
 
         // 更新 action_label（无论是否是自己）
@@ -5601,6 +5649,9 @@ export class gamingPvp extends Component {
             // 翻牌/转牌/河牌阶段
             const communityCards = data.communityCards;
             const phase = data.phase || 'FLOP';
+
+            // This is an incremental message: refresh valid private cards only.
+            this._syncSelfHoleCardsFromPlayers(data.players);
 
 
             // ✅ [修复] 不再清空公牌显示，保留之前的公牌
@@ -6681,6 +6732,10 @@ export class gamingPvp extends Component {
         // ✅ [新增] 过滤可疑的玩家数据
         // 获取当前玩家ID
         const currentUserId = this._gameNetwork?.getUserId();
+        const previousSelfSeat = this._playerManager.getPlayerSeat();
+        const previousSelfCards = previousSelfSeat >= 0
+            ? this._gameManager.getPlayerHoleCardsFromServer(previousSelfSeat)
+            : undefined;
 
         // 过滤掉无效的玩家数据（userId为空、座位索引无效）
         const validPlayers = playersData.filter((player, idx) => {
@@ -6776,6 +6831,23 @@ export class gamingPvp extends Component {
         });
 
         this._gameManager.initializePlayersChipsFromServer(processedPlayersData);
+
+        // reset(false) clears GameManager state. Restore the current player's
+        // cards from this payload, or preserve the previous valid hand when an
+        // older/incremental payload omits private-card fields.
+        const incomingSelf = processedPlayersData.find((playerData: any) => {
+            const playerUserId = playerData?.userId !== undefined ? playerData.userId : playerData?.user_id;
+            return playerData?.isSelf === true || (currentUserId !== undefined
+                && currentUserId !== null
+                && Number(playerUserId) === Number(currentUserId));
+        });
+        const incomingSelfCards = this._getVisibleHoleCards(incomingSelf);
+        if (incomingSelf && incomingSelf.seatIndex !== undefined && incomingSelfCards) {
+            this._gameManager.setPlayerHoleCardsFromServer(incomingSelf.seatIndex, incomingSelfCards);
+        } else if (incomingSelf && incomingSelf.seatIndex !== undefined
+            && Array.isArray(previousSelfCards) && previousSelfCards.length === 2) {
+            this._gameManager.setPlayerHoleCardsFromServer(incomingSelf.seatIndex, previousSelfCards);
+        }
 
         processedPlayersData.forEach((playerData, idx) => {
             if (!playerData) return;
