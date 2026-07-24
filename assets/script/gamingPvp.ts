@@ -5053,12 +5053,23 @@ export class gamingPvp extends Component {
         const status = gameStatus || '';
         const isGameActive = status !== 'WAITING' && status !== 'SETTLEMENT' && status !== 'WAITING_FOR_CONFIRMATION';
 
-        if (!isGameActive || forceRecreate || !this._playerCards || this._playerCards.length === 0) {
+        // ✅ [修复 离线重连手牌消失] 不能只看 _playerCards.length 是否为0来判断"是否已有手牌"，
+        // 因为断线期间场景/节点树可能已被销毁重建，_playerCards 数组本身长度还在（旧引用），
+        // 但里面的 Node 早已 isValid=false（已被销毁），此时如果仍然 return，会导致
+        // 重连后所有玩家（包括自己）的手牌节点都不会被重新创建，牌面就"全部消失"。
+        // 这里改为实际校验数组中是否存在有效（isValid）的牌节点，只有存在有效节点时才跳过重建。
+        const hasValidExistingCards = !!this._playerCards
+            && this._playerCards.length > 0
+            && this._playerCards.some(cards =>
+                Array.isArray(cards) && cards.length > 0 && cards.every(node => node && node.isValid)
+            );
+
+        if (!isGameActive || forceRecreate || !hasValidExistingCards) {
             this.clearPlayerCards();
             this._playerCards = new Array(this._playerManager.getPlayersNum()).fill(0).map(() => []);
-            LogService.info('gamingPvp', `[updatePlayerHoleCardsFromState] 清除并重新初始化手牌: status=${status}, isGameActive=${isGameActive}, forceRecreate=${forceRecreate}, _playerCardsLength=${this._playerCards?.length || 0}`);
+            LogService.info('gamingPvp', `[updatePlayerHoleCardsFromState] 清除并重新初始化手牌: status=${status}, isGameActive=${isGameActive}, forceRecreate=${forceRecreate}, hasValidExistingCards=${hasValidExistingCards}, _playerCardsLength=${this._playerCards?.length || 0}`);
         } else {
-            LogService.info('gamingPvp', `[updatePlayerHoleCardsFromState] 游戏进行中且已有手牌，跳过清除操作`);
+            LogService.info('gamingPvp', `[updatePlayerHoleCardsFromState] 游戏进行中且已有有效手牌节点，跳过清除操作`);
             return;
         }
 
@@ -8658,11 +8669,11 @@ export class gamingPvp extends Component {
             this.clearActionPending();
             this.stopActionTimer();
 
-            // 超时后隐藏自己的手牌（服务端确认弃牌后也会通过215/结算同步）
-            const playerSeat = this._playerManager.getPlayerSeat();
-            if (playerSeat >= 0) {
-                this.hideAIFoldedPlayerCards(playerSeat);
-            }
+            // 不在本地倒计时结束时隐藏任何玩家的手牌。
+            // 每个客户端都可能收到同一行动玩家的倒计时结束回调，如果这里使用
+            // getPlayerSeat()，会误删各客户端自己的手牌。真正的超时弃牌由后端
+            // 处理，并通过 222/FOLD 通知携带弃牌玩家身份，再由
+            // handlePlayerActionNotify 精确隐藏对应座位的手牌。
         }
 
         // 隐藏胜利面板
