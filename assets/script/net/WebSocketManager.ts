@@ -4,6 +4,7 @@
  * 支持字符串消息和二进制protobuf消息
  */
 
+import { game, Game } from 'cc';
 import { LogService } from '../utils/LogService';
 import { NetworkOptimizer } from './NetworkOptimizer';
 import { GameMessageHandler } from './GameMessageHandler';
@@ -24,6 +25,13 @@ export class WebSocketManager {
     private _sequence: number = 0;
     private _url: string = '';
     private _userId: number = 0; // ✅ 新增：保存用户ID，用于心跳消息
+
+    // ✅ [新增] 息屏/切后台恢复相关
+    private _hiddenAt: number = 0; // 进入后台的时间戳
+    private _resumeProbeTimer: any = null; // 前台恢复时的探活定时器
+    private _reconnectTimer: any = null; // 重连退避定时器句柄，便于恢复前台时取消
+    private static readonly RESUME_STALE_THRESHOLD_MS: number = 10000; // 后台超过此时长，认为心跳大概率已丢失
+    private static readonly RESUME_PROBE_TIMEOUT_MS: number = 4000; // 前台恢复探活的超时时间（比常规15s心跳超时短很多）
     
     // 网络优化器
     private _optimizer: NetworkOptimizer = null;
@@ -49,6 +57,110 @@ export class WebSocketManager {
     constructor() {
         this._optimizer = NetworkOptimizer.getInstance();
         this._messageHandler = new GameMessageHandler();
+
+        // ✅ [新增] 监听 App 前后台切换（息屏/切后台会触发 EVENT_HIDE，
+        // 亮屏/切回前台触发 EVENT_SHOW）。息屏期间 JS 定时器会被节流甚至冻结，
+        // 心跳超时检测可能完全失效，所以必须在恢复前台时主动探活/重连，
+        // 而不是被动等待心跳定时器自己恢复。
+        game.on(Game.EVENT_HIDE, this._onGameHide, this);
+        game.on(Game.EVENT_SHOW, this._onGameShow, this);
+    }
+
+    /**
+     * ✅ [新增] App 进入后台/息屏
+     */
+    private _onGameHide(): void {
+        this._hiddenAt = Date.now();
+        LogService.info('WebSocketManager', '📱 App 进入后台/息屏');
+    }
+
+    /**
+     * ✅ [新增] App 恢复前台/亮屏
+     * 息屏期间心跳定时器会被浏览器节流冻结，断线检测可能完全没跑起来，
+     * 也可能出现"僵尸连接"（readyState仍是OPEN但实际已不可用）。
+     * 因此这里恢复前台时必须主动检查/探活，不能只依赖定时器自愈。
+     */
+    private _onGameShow(): void {
+        const hiddenDuration = this._hiddenAt > 0 ? Date.now() - this._hiddenAt : 0;
+        this._hiddenAt = 0;
+        LogService.info('WebSocketManager', `📱 App 恢复前台，后台时长=${hiddenDuration}ms`);
+
+        if (!this._isConnected || !this._ws || this._ws.readyState !== WebSocket.OPEN) {
+            LogService.warn('WebSocketManager', '⚠️ 恢复前台时发现连接已断开，立即强制重连');
+            this._forceReconnectNow();
+            return;
+        }
+
+        if (hiddenDuration > WebSocketManager.RESUME_STALE_THRESHOLD_MS) {
+            // 后台时间较长，心跳大概率已经停摆，直接做一次快速探活，
+            // 不再等待完整的15s心跳超时判断
+            this._probeConnectionOnResume();
+        } else {
+            // 短暂息屏，心跳定时器可能被冻结丢失，重启一下确保继续运行
+            this._startHeartbeat(true);
+        }
+    }
+
+    /**
+     * ✅ [新增] 前台恢复时的快速探活：发一次心跳，用较短超时判断连接是否存活
+     */
+    private _probeConnectionOnResume(): void {
+        if (this._resumeProbeTimer != null) {
+            clearTimeout(this._resumeProbeTimer);
+        }
+
+        const probeTime = Date.now();
+        this._lastHeartbeatSendTime = probeTime;
+        this.sendMessage(1, { client_time: probeTime, timestamp: probeTime }); // CommandType.HEARTBEAT = 1
+
+        this._resumeProbeTimer = setTimeout(() => {
+            this._resumeProbeTimer = null;
+            LogService.warn('WebSocketManager', '⚠️ 恢复前台探活无响应，判定连接已失效，强制重连');
+            this._forceReconnectNow();
+        }, WebSocketManager.RESUME_PROBE_TIMEOUT_MS);
+    }
+
+    /**
+     * ✅ [新增] 强制立即重连（跳过退避延迟，重置重连次数配额）
+     * 用于前台恢复场景：不能沿用后台期间可能已经耗尽的重连次数，
+     * 也不需要用户再等一次指数退避延迟。
+     */
+    private _forceReconnectNow(): void {
+        if (this._resumeProbeTimer != null) {
+            clearTimeout(this._resumeProbeTimer);
+            this._resumeProbeTimer = null;
+        }
+        if (this._reconnectTimer != null) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
+
+        const wasConnected = this._isConnected;
+        this._cancelConnectTimeout();
+        this._stopHeartbeat();
+        this._isConnected = false;
+
+        if (this._ws) {
+            try {
+                this._ws.close();
+            } catch (e) {
+                LogService.error('WebSocketManager', '关闭失效连接失败:', e);
+            }
+            this._ws = null;
+        }
+
+        // 连接此前确实是"看起来正常"的状态，通知上层进入重连流程，
+        // 以便上层（GameNetwork）正确标记 _isReconnecting / _sessionRestored
+        if (wasConnected && this._onDisconnected) {
+            this._onDisconnected();
+        }
+
+        this._reconnectAttempts = 0;
+        if (!this._url) {
+            LogService.warn('WebSocketManager', '⚠️ 无法立即重连：url 为空');
+            return;
+        }
+        this.connect(this._url);
     }
     
     /**
@@ -222,6 +334,14 @@ export class WebSocketManager {
      */
     public disconnect(): void {
         this._stopHeartbeat();
+        if (this._resumeProbeTimer != null) {
+            clearTimeout(this._resumeProbeTimer);
+            this._resumeProbeTimer = null;
+        }
+        if (this._reconnectTimer != null) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
         
         if (this._ws) {
             try {
@@ -460,7 +580,16 @@ export class WebSocketManager {
      */
     public handleHeartbeatResponse(serverTime: number): void {
         this._stopHeartbeatResponseTimer();
-        
+
+        // ✅ [新增] 如果这是前台恢复探活期间收到的响应，说明连接其实是活的，
+        // 取消探活超时判定，并恢复正常周期心跳
+        if (this._resumeProbeTimer != null) {
+            clearTimeout(this._resumeProbeTimer);
+            this._resumeProbeTimer = null;
+            LogService.info('WebSocketManager', '✅ 恢复前台探活成功，连接仍然存活');
+            this._startHeartbeat(false);
+        }
+
         if (this._lastHeartbeatSendTime > 0) {
             const rtt = Date.now() - this._lastHeartbeatSendTime;
             this._optimizer.updateHeartbeatRtt(rtt);
@@ -490,7 +619,11 @@ export class WebSocketManager {
 
         LogService.info('WebSocketManager', `🔄 第${this._reconnectAttempts}次重连，延迟${delay}ms`);
 
-        setTimeout(() => {
+        if (this._reconnectTimer != null) {
+            clearTimeout(this._reconnectTimer);
+        }
+        this._reconnectTimer = setTimeout(() => {
+            this._reconnectTimer = null;
             this.connect(this._url);
         }, delay);
     }

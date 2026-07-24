@@ -2,6 +2,7 @@
  * 游戏网络管理器
  * 负责游戏的网络连接、登录等
  */
+import { game, Game } from 'cc';
 import { LogService } from '../utils/LogService';
 import { WebSocketManager } from './WebSocketManager';
 import { NetworkOptimizer } from './NetworkOptimizer';
@@ -146,6 +147,26 @@ export class GameNetwork {
         // ✅ [修改] 页面刷新/应用重启时，不恢复持久化的token，用户需要手动登录
         // this.loadPersistedAuth();
         this.setupCallbacks();
+
+        // ✅ [新增] 息屏/切后台恢复时，WebSocketManager 会自行处理 socket 层面的
+        // 探活/重连，但服务端会话（token 校验/RECONNECT）恢复需要 GameNetwork 主动
+        // 触发，不能只等下一次业务请求时被动调用 ensureSessionReady()
+        game.on(Game.EVENT_SHOW, this._onAppResume, this);
+    }
+
+    /**
+     * ✅ [新增] App 恢复前台时的兜底：确保登录会话尽快恢复
+     * 延迟一小段时间，给 WebSocketManager 留出时间完成 socket 层的探活/重连
+     */
+    private _onAppResume(): void {
+        setTimeout(() => {
+            if (this.isLoggedIn() && !this._sessionRestored) {
+                LogService.info('GameNetwork', '📱 App 恢复前台，主动检查/恢复登录会话');
+                this.ensureSessionReady().catch((e) => {
+                    LogService.warn('GameNetwork', '恢复前台后会话恢复失败: ' + e);
+                });
+            }
+        }, 800);
     }
 
     /**
@@ -544,17 +565,16 @@ export class GameNetwork {
             if (this._wsManager.isConnected()) {
                 this.sendReconnectRequest();
             } else {
-                LogService.warn('GameNetwork', 'WebSocket 未连接，无法发送 RECONNECT 请求');
+                // ✅ [修复] 之前这里只打日志、什么都不做，导致断线后如果调用方
+                // 只依赖 reconnectAndLogin() 就永远恢复不了。现在主动触发底层重连。
+                LogService.warn('GameNetwork', 'WebSocket 未连接，主动触发重新连接');
+                this.connect();
             }
         } finally {
             this._isLoggingIn = false;
             this._loginPromise = null;
         }
     }
-
-    private _retryCount: number = 0;
-    private readonly MAX_RETRY = 3;
-    private readonly RETRY_DELAY = 2000; // 重试间隔
 
     /**
      * 连接到服务器
@@ -709,7 +729,6 @@ export class GameNetwork {
             LogService.info('GameNetwork', '📤 WALLET_LOGIN 请求已发送，等待响应...');
             // 成功后重置
             this._sessionRestored = true;
-            this._retryCount = 0;
 
         } catch (error) {
             LogService.error('GameNetwork', '   - 错误信息: ' + error.message);

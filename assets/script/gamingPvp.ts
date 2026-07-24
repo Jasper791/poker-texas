@@ -2228,12 +2228,14 @@ export class gamingPvp extends Component {
 
             const reconnectStatus = reconnectData?.reconnectStatus;
             const gameState = reconnectData?.gameState || reconnectData;
-            if (reconnectStatus === 'SPECTATOR_UNTIL_NEXT_ROUND') {
-                LogService.info('gamingPvp', '重连状态为观战，隐藏操作按钮，等待下一局');
-                this.hideAllActionButtons();
-            } else if (reconnectStatus === 'RESTORED' && reconnectData?.gameState) {
-                LogService.info('gamingPvp', '重连状态为 RESTORED，使用服务端 gameState 覆盖本地牌局');
+            if (reconnectData?.gameState) {
+                LogService.info('gamingPvp', `重连状态为 ${reconnectStatus || 'UNKNOWN'}，使用服务端 gameState 覆盖本地牌局`);
                 this.handleGameStateSync(gameState);
+            }
+
+            if (reconnectStatus === 'SPECTATOR_UNTIL_NEXT_ROUND') {
+                LogService.info('gamingPvp', '重连状态为观战，保留当前局座位和手牌展示，隐藏操作按钮并等待下一局');
+                this.hideAllActionButtons();
             }
             
             // ✅ [关键修复] 重连成功后重新设置消息回调，确保后续消息能被正确处理
@@ -2789,6 +2791,10 @@ export class gamingPvp extends Component {
         this.updateHomeownerIndicator();
         this._syncGameStateFromRoomInfo(data);
         this._syncPlayerGameState(data.players, currentUserId);
+        // ROOM_INFO 会返回当前玩家的底牌；除了写入 GameManager 缓存，
+        // 还需要重建牌节点，否则刷新/重进后公共牌已恢复，但手牌仍不可见。
+        const gameStatus = data.phase || data.gamePhase || data.status || data.gameStatus;
+        this.updatePlayerHoleCardsFromState(data.players, undefined, gameStatus);
         this._syncCurrentActPlayerFromRoomInfo(data, currentUserId);
         this._syncGamePhaseFromRoomInfo(data);
         this._restoreActionButtonsIfNeeded(data, currentUserId);
@@ -5094,8 +5100,9 @@ export class gamingPvp extends Component {
                 continue;
             }
 
-            // 检查玩家是否活跃且在回合中（只有回合内的活跃玩家才显示手牌）
-            if (!this._playerManager.isPlayerActive(seatIndex)) {
+            // 对手弃牌后继续隐藏手牌；当前玩家重连为旁观状态时，仍允许恢复自己的底牌。
+            const isSelfPlayer = seatIndex === this._playerManager.getPlayerSeat();
+            if (!isSelfPlayer && !this._playerManager.isPlayerActive(seatIndex)) {
                 continue;
             }
             if (!this._playerManager.isPlayerInRound(seatIndex)) {
@@ -5119,7 +5126,7 @@ export class gamingPvp extends Component {
             }
 
             // 是否是真实玩家
-            const isPlayer = seatIndex === this._playerManager.getPlayerSeat();
+            const isPlayer = isSelfPlayer;
 
             // 是否有有效的手牌数据（服务端可能不推送对手手牌以保证安全公平）
             const hasValidCards = holeCards && Array.isArray(holeCards) && holeCards.length === 2;

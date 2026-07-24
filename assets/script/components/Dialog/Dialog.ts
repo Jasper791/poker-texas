@@ -35,6 +35,8 @@ export class Dialog extends Component {
 
     private _onConfirm: (() => void) | null = null;
     private _onCancel: (() => void) | null = null;
+    // ✅ [修复] 防止快速连点导致回调被重复触发 / 重复关闭
+    private _closed: boolean = false;
 
     onLoad() {
         // 绑定按钮点击事件
@@ -125,6 +127,9 @@ export class Dialog extends Component {
 
     // 初始化内容
     init(options: DialogOptions) {
+        // ✅ [修复] 每次 init 时重置关闭状态，避免节点被复用（对象池等场景）时按钮失效
+        this._closed = false;
+
         if (this.titleLabel) {
             this.titleLabel.string = options.title ?? '提示';
         }
@@ -142,20 +147,30 @@ export class Dialog extends Component {
         this._onConfirm = options.onConfirm ?? null;
         this._onCancel = options.onCancel ?? null;
 
-        // 显示/隐藏取消按钮
-        // if (this.cancelBtn?.node) {
-        //     this.cancelBtn.node.active = !!options.onCancel;
-        // }
+        // ✅ [修复] 显示/隐藏取消按钮：只有传了 onCancel 才显示取消按钮
+        if (this.cancelBtn?.node) {
+            this.cancelBtn.node.active = !!options.onCancel;
+        }
     }
 
     // 确定
     onConfirmClick() {
+        // ✅ [修复] 防止重复点击导致回调被多次触发
+        if (this._closed) {
+            return;
+        }
+        this._closed = true;
         this._onConfirm?.();
         this.close();
     }
 
     // 取消
     onCancelClick() {
+        // ✅ [修复] 防止重复点击导致回调被多次触发
+        if (this._closed) {
+            return;
+        }
+        this._closed = true;
         this._onCancel?.();
         this.close();
     }
